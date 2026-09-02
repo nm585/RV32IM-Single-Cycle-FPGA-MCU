@@ -8,6 +8,10 @@ interrupt logic, clock generation, and the divider accelerator.
 `DUT/RV32IM_CORE.vhd` integrates the processor stages, DTCM, and interrupt
 service unit.
 
+## Target development board
+
+This project was designed and built to run on the **Terasic DE10-Standard** development kit, based on the Intel Cyclone V SoC FPGA.
+
 ## Architecture
 
 | Area | Main source files |
