@@ -1,2 +1,134 @@
-# RV32IM-Single-Cycle-FPGA-MCU
-Single-cycle RV32IM MCU for FPGA, implemented in VHDL with ITCM/DTCM, memory-mapped GPIO, timer/PWM, interrupts, a hardware divider, and ModelSim tests. Developed as the final project for the Advanced CPU Architecture and Hardware Accelerators Lab (361-1-4693) at Ben-Gurion University.
+# RV32IM single-cycle MCU DUT
+
+The `DUT/` directory contains the VHDL implementation of a single-cycle MCU:
+the RV32IM processor datapath, ITCM and DTCM, memory-mapped peripherals,
+interrupt logic, clock generation, and the divider accelerator.
+
+`DUT/FPGA_Top_SingleCycle.vhd` is the board-level top entity.
+`DUT/RV32IM_CORE.vhd` integrates the processor stages, DTCM, and interrupt
+service unit.
+
+## Architecture
+
+| Area | Main source files |
+|---|---|
+| Packages and component declarations | `DUT/cond_compilation_package.vhd`, `DUT/const_package.vhd`, `DUT/aux_package.vhd` |
+| Board-level integration | `DUT/FPGA_Top_SingleCycle.vhd` |
+| Processor and DTCM integration | `DUT/RV32IM_CORE.vhd` |
+| Fetch and ITCM | `DUT/IFETCH.VHD` |
+| Decode and register file | `DUT/IDECODE.VHD` |
+| Control | `DUT/CONTROL.VHD` |
+| Execute and ALU | `DUT/EXECUTE.VHD` |
+| DTCM | `DUT/DMEMORY.VHD` |
+| Multiplier | `DUT/Multiplier_16bit.vhd` |
+| Divider and clock-domain crossing | `DUT/Divider_32bit.vhd`, `DUT/Divider_CDC.vhd` |
+| GPIO and seven-segment displays | `DUT/GPIO_Peripheral.vhd`, `DUT/seven_seg_active_low.vhd` |
+| Basic timer and PWM | `DUT/Basic_Timer.vhd` |
+| Interrupt handling | `DUT/Interrupt_Controller.vhd`, `DUT/Interrupt_Service_Unit.vhd` |
+| Shared-bus adapter | `DUT/BidirPin.vhd` |
+| Clock generation | `DUT/Clock_Tree.vhd`, `DUT/PLL.vhd` |
+
+## Clock and reset domains
+
+`Clock_Tree` provides three clock domains:
+
+- `MCLK` for the processor core and DTCM
+- `SMCLK` for GPIO, the basic timer, and the interrupt controller
+- `DIVCLK` for the multicycle divider
+
+In hardware mode, three `PLL` instances generate the clocks from `CLOCK_50`.
+When the top-level `MODELSIM` generic is nonzero, `Clock_Tree` bypasses the PLLs
+and drives all three domains directly from `CLOCK_50`.
+
+`KEY0` is the active-low system-reset input. The top level holds the design in
+reset until `KEY0` is pressed once after configuration and conditions the reset
+through two registers in the `CLOCK_50` domain.
+
+## Shared address and data buses
+
+`FPGA_Top_SingleCycle` defines a 16-bit global byte-address bus and a resolved
+32-bit bidirectional data bus. The address bus is driven from the low 16 bits of
+the ALU result. DTCM occupies addresses whose three most-significant address
+bits are `000`, corresponding to `0x0000` through `0x1FFF`.
+
+Five `BidirPin` instances connect the CPU, DTCM, GPIO, basic timer, and
+interrupt controller to the shared data bus. Read and write commands remain
+separate control signals. Each peripheral performs its own exact address
+decode.
+
+During interrupt dispatch, `RV32IM_CORE` uses the captured `TYPE` value as the
+DTCM byte address for the interrupt-vector fetch. Normal DTCM accesses use the
+ALU result.
+
+## Memory-mapped registers
+
+| Block | Register | Byte address | Access |
+|---|---|---:|---|
+| GPIO | `PORT_LEDR` | `0x2000` | Write |
+| GPIO | `PORT_HEX0` | `0x2004` | Write |
+| GPIO | `PORT_HEX1` | `0x2005` | Write |
+| GPIO | `PORT_HEX2` | `0x2008` | Write |
+| GPIO | `PORT_HEX3` | `0x2009` | Write |
+| GPIO | `PORT_HEX4` | `0x200C` | Write |
+| GPIO | `PORT_HEX5` | `0x200D` | Write |
+| GPIO | `PORT_SW` | `0x2010` | Read |
+| GPIO | `PORT_PB` | `0x2014` | Read |
+| Basic timer | `BTCTL1` | `0x201C` | Read/write |
+| Basic timer | `BTCTL2` | `0x201D` | Read/write |
+| Basic timer | `BTCMPR0` | `0x2020` | Read/write |
+| Basic timer | `BTCMPR1` | `0x2024` | Read/write |
+| Basic timer | `BTCAPR` | `0x2028` | Read/write |
+| Interrupt controller | `IE` | `0x202C` | Read/write |
+| Interrupt controller | `IFG` | `0x202D` | Read/write |
+| Interrupt controller | `TYPE` | `0x202E` | Read |
+
+`PORT_SW` and `PORT_PB` return the board inputs directly without storage.
+`PORT_PB` preserves the active-low levels of `KEY1` through `KEY3`.
+
+## GPIO timing
+
+The GPIO output registers are rising-edge `SMCLK` DFFs. On that edge,
+`GPIO_Peripheral` samples the decoded address, write command, and write data.
+The LED and seven-segment outputs therefore require the input buses to satisfy
+the normal setup and hold interval of the registering edge; no falling-edge
+write-data staging register is used in `RV32IM_CORE`.
+
+## Timer and interrupts
+
+`Basic_Timer` contains the control, compare, capture, counter, PWM, and timer
+interrupt logic. A hardware capture into `BTCAPR` has priority over a software
+write to the same register.
+
+`Interrupt_Controller` stores `IE` and `IFG`, selects the highest-priority
+pending source, reports its vector through `TYPE`, and generates `INTR` when
+the selected source and the global interrupt enable permit it. Pushbutton
+events are generated by inverting the active-low `KEY1` through `KEY3` inputs
+in `FPGA_Top_SingleCycle`.
+
+`Interrupt_Service_Unit` implements interrupt acknowledge, vector fetch,
+dispatch, and return-address handling inside the processor clock domain.
+
+## Arithmetic accelerator scope
+
+`Multiplier_16bit` is an unsigned 16-by-16 multiplier that uses the low 16 bits
+of each operand. `Divider_32bit` is an unsigned iterative divider that produces
+one quotient bit per `DIVCLK` cycle and completes after 32 cycles.
+`Divider_CDC` transfers divider requests and results between `MCLK` and
+`DIVCLK`.
+
+The control logic recognizes `DIV`, `DIVU`, `REM`, and `REMU`, but all four
+currently use the unsigned divider. Signed division and remainder therefore do
+not implement the full RV32M signed semantics.
+
+## Naming convention
+
+Normalized internal names use the following suffixes:
+
+- `_i` and `_o` for entity input and output ports
+- `_w` for combinational signals
+- `_q` for registered state
+- `_v` for process-local variables
+- `_U`, `_P`, and `_G` for instance, process, and generate labels
+
+Established stage labels such as `IFE`, `ID`, `CTL`, `EXE`, and `MEM` remain
+unchanged.
