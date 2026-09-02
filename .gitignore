@@ -1,0 +1,25 @@
+.DS_Store
+**/.DS_Store
+
+# ModelSim / Questa generated files
+work/
+transcript
+*.wlf
+*.vcd
+*.cr.mti
+
+# Quartus generated files
+**/db/
+**/incremental_db/
+**/output_files/
+**/simulation/
+*.qws
+*.rpt
+*.summary
+*.smsg
+*.qmsg
+*.sof
+*.pof
+*.bak
+*.bak_before_fix
+*_model_dump.txt
